@@ -1,0 +1,18 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python generated files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Secrets and environment variables
+.env
+**/.env
+
+# Testing artifacts
+.pytest_cache/
+
+# Local VS Code workspace
+*.code-workspace
