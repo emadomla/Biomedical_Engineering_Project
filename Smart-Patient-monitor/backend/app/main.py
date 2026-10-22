@@ -1,5 +1,5 @@
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -66,14 +66,24 @@ def receive_measurement(
     }
 
 
+
 @app.get("/api/v1/measurements")
 def list_measurements(
+    device_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
+    query = db.query(Measurement)
+
+    if device_id:
+        query = query.filter(
+            Measurement.device_id == device_id
+        )
+
     records = (
-        db.query(Measurement)
+        query
         .order_by(Measurement.id.desc())
-        .limit(100)
+        .limit(limit)
         .all()
     )
 
