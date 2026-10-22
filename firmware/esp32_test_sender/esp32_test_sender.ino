@@ -1,19 +1,34 @@
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <esp_sleep.h>
 
 // ==============================================================================
-// QUICK-ACCESS CONFIGURATION (Easily change your pins & timers here)
+// QUICK-ACCESS CONFIGURATION (Easily change your pins, timers & security here)
 // ==============================================================================
 
-// 1. Hardware Wakeup Pin
+// 1. Security & Authentication Configuration
+// The secret API Key that matches your FastAPI backend (.env / ESP32_API_KEY)
+#define ESP32_API_KEY           "bme_secret_esp32_key_2026"
+
+// 0 = TLS encrypted connection with setInsecure() for local IPs (e.g. 192.168.x.x)
+// 1 = Strict CA Certificate validation (for production domain with CA)
+#define USE_STRICT_SSL_CERT     0
+
+// Optional: Root CA Certificate for strict validation (used when USE_STRICT_SSL_CERT = 1)
+const char* SERVER_ROOT_CA = \
+"-----BEGIN CERTIFICATE-----\n" \
+"MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdKedrN48TzANBgkqhkiG9w0BAQsFADBh\n" \
+"...\n" \
+"-----END CERTIFICATE-----\n";
+
+// 2. Hardware Wakeup Pin
 // Change WAKEUP_SENSOR_PIN to match your sensor's interrupt or lead-off detection pin.
-// Note: Must be an RTC GPIO (e.g. GPIO 0, 2, 4, 12, 13, 14, 15, 25, 26, 27, 32, 33, 34, 35, 36, 39).
 #define WAKEUP_SENSOR_PIN       4       // Default RTC GPIO 4 (change when hardware is ready)
 #define WAKEUP_PIN_LEVEL        0       // 0 = Wake on LOW (sensor pulled to GND / INT asserted)
                                         // 1 = Wake on HIGH
 
-// 2. Inactivity Timeout Configuration
+// 3. Inactivity Timeout Configuration
 // Set TEST_FAST_TIMEOUT to 1 during testing (30s) or 0 for production (2 minutes).
 #define TEST_FAST_TIMEOUT       0
 
@@ -25,10 +40,11 @@
 
 #define SEND_INTERVAL_MS        10000UL   // Send measurement interval (10 seconds)
 
-// 3. Network Credentials & Endpoint
+// 4. Network Credentials & Endpoint
 const char* WIFI_SSID     = "WIFI_NAME";
 const char* WIFI_PASSWORD = "WIFI_PASSWORD";
-const char* SERVER_URL    = "http://192.168.1.0:8000/api/v1/measurements";
+// Secure HTTPS Endpoint
+const char* SERVER_URL    = "https://192.168.1.0:8000/api/v1/measurements";
 const char* DEVICE_ID     = "esp32_001";
 
 // ==============================================================================
@@ -88,41 +104,57 @@ void connectToWiFi() {
 }
 
 // ==============================================================================
-// HTTP Data Transmission
+// Secure HTTPS Data Transmission with API Key Authentication
 // ==============================================================================
 void sendMeasurement(int heartRate, float spo2, const char* statusNote) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[HTTP] Wi-Fi disconnected, skipping send.");
+    Serial.println("[HTTPS] Wi-Fi disconnected, skipping send.");
     return;
   }
 
-  WiFiClient client;
-  HTTPClient http;
+  // 1. Initialize Secure TLS Client
+  WiFiClientSecure client;
 
-  if (!http.begin(client, SERVER_URL)) {
-    Serial.println("[HTTP] Could not begin HTTP request.");
+  if (USE_STRICT_SSL_CERT) {
+    client.setCACert(SERVER_ROOT_CA);
+    Serial.println("[TLS] Configured with strict CA root certificate.");
+  } else {
+    // Encrypts all traffic with TLS over local IP without requiring local CA chain
+    client.setInsecure();
+  }
+
+  // 2. Begin HTTPS Request
+  HTTPClient https;
+  if (!https.begin(client, SERVER_URL)) {
+    Serial.println("[HTTPS] Could not begin secure connection.");
     return;
   }
 
-  http.addHeader("Content-Type", "application/json");
+  // 3. Set Content-Type and Secret API Key Header
+  https.addHeader("Content-Type", "application/json");
+  https.addHeader("X-API-Key", ESP32_API_KEY);
 
   // Format valid JSON payload compatible with FastAPI backend
   String payload = "{\"device_id\":\"" + String(DEVICE_ID) + "\","
                  + "\"heart_rate_bpm\":" + String(heartRate) + ","
                  + "\"spo2_percent\":" + String(spo2, 1) + "}";
 
-  Serial.printf("[HTTP] Sending (%s): %s\n", statusNote, payload.c_str());
-  int statusCode = http.POST(payload);
+  Serial.printf("[HTTPS] Sending encrypted data (%s): %s\n", statusNote, payload.c_str());
+  int statusCode = https.POST(payload);
 
-  Serial.printf("[HTTP] Server Response Status: %d\n", statusCode);
-  if (statusCode > 0) {
-    Serial.print("[HTTP] Response Body: ");
-    Serial.println(http.getString());
+  Serial.printf("[HTTPS] Server Response Status: %d\n", statusCode);
+  if (statusCode == 200) {
+    Serial.print("[HTTPS] Response Verified: ");
+    Serial.println(https.getString());
+  } else if (statusCode == 401) {
+    Serial.println("[AUTH ERROR] 401 Unauthorized! Check your ESP32_API_KEY in firmware and backend .env.");
+  } else if (statusCode > 0) {
+    Serial.printf("[HTTPS] Response (%d): %s\n", statusCode, https.getString().c_str());
   } else {
-    Serial.printf("[HTTP] POST error: %s\n", HTTPClient::errorToString(statusCode).c_str());
+    Serial.printf("[HTTPS] Connection error: %s\n", HTTPClient::errorToString(statusCode).c_str());
   }
 
-  http.end();
+  https.end();
 }
 
 // ==============================================================================
@@ -192,6 +224,9 @@ void setup() {
   printWakeupReason();
 
   Serial.println("--------------------------------------------------");
+  Serial.println("SECURE BIOMONITOR ESP32 TELEMETRY (HTTPS + API-KEY)");
+  Serial.printf("Endpoint:           %s\n", SERVER_URL);
+  Serial.printf("API Key Configured: %s\n", (strlen(ESP32_API_KEY) > 0 ? "YES" : "NO"));
   Serial.printf("Deep Sleep Timeout: %lu seconds\n", INACTIVITY_TIMEOUT_MS / 1000);
   Serial.printf("Sensor Wakeup Pin:  GPIO %d\n", WAKEUP_SENSOR_PIN);
   Serial.println("Simulation Controls (Type in Serial Monitor):");
