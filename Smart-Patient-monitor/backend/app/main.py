@@ -1,10 +1,19 @@
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from .database import Base, engine, get_db
+from .models import Measurement
+
+
+# Create the database table if it does not exist.
+Base.metadata.create_all(bind=engine)
+
 
 app = FastAPI(
     title="Smart Patient Monitor API",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 
@@ -29,9 +38,55 @@ def health_check():
 
 
 @app.post("/api/v1/measurements")
-def receive_measurement(measurement: MeasurementInput):
+def receive_measurement(
+    measurement: MeasurementInput,
+    db: Session = Depends(get_db),
+):
+    # Convert the validated input into a database record.
+    db_measurement = Measurement(**measurement.model_dump())
+
+    try:
+        db.add(db_measurement)
+        db.commit()
+        db.refresh(db_measurement)
+    except Exception:
+        db.rollback()
+        raise
+
     return {
         "status": "received",
-        "message": "Measurement received successfully",
-        "data": measurement.model_dump(),
+        "message": "Measurement saved successfully",
+        "data": {
+            "id": db_measurement.id,
+            "device_id": db_measurement.device_id,
+            "heart_rate_bpm": db_measurement.heart_rate_bpm,
+            "spo2_percent": db_measurement.spo2_percent,
+            "created_at": db_measurement.created_at,
+        },
+    }
+
+
+@app.get("/api/v1/measurements")
+def list_measurements(
+    db: Session = Depends(get_db),
+):
+    records = (
+        db.query(Measurement)
+        .order_by(Measurement.id.desc())
+        .limit(100)
+        .all()
+    )
+
+    return {
+        "count": len(records),
+        "data": [
+            {
+                "id": record.id,
+                "device_id": record.device_id,
+                "heart_rate_bpm": record.heart_rate_bpm,
+                "spo2_percent": record.spo2_percent,
+                "created_at": record.created_at,
+            }
+            for record in records
+        ],
     }

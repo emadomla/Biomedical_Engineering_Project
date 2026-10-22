@@ -16,3 +16,17 @@ __pycache__/
 
 # Local VS Code workspace
 *.code-workspace
+
+# Local SQLite database
+/Smart-Patient-monitor/backend/app/smart_patient_monitor.db
+
+# Python temporary files
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# SQLite database files
+/Smart-Patient-monitor/backend/app/smart_patient_monitor.db
+*.db-journal
+*.db-wal
+*.db-shm
