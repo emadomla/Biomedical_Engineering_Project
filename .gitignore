@@ -30,3 +30,6 @@ __pycache__/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# DB Browser for SQLite project files
+*.sqbpro
